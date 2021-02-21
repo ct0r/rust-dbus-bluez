@@ -2,24 +2,23 @@ use dbus::arg::{prop_cast, PropMap};
 use dbus::blocking::stdintf::org_freedesktop_dbus::ObjectManager;
 use dbus::blocking::Connection;
 use dbus::{Error, Path};
-use std::time::Duration;
+use std::{thread, time::Duration};
 
 fn main() {
     let conn = Connection::new_system().unwrap();
 
-    println!("Adapters:");
-    get_adapters(&conn)
-        .unwrap()
-        .into_iter()
-        .for_each(|a| println!("{}", a.name));
-    println!();
+    let adapters = get_adapters(&conn).unwrap();
+    print_adapters(&adapters);
 
-    println!("Devices:");
-    get_devices(&conn)
-        .unwrap()
-        .into_iter()
-        .for_each(|d| println!("{}", d.name));
-    println!();
+    let devices = get_devices(&conn).unwrap();
+    print_devices(&devices);
+
+    start_discovery(&conn).unwrap();
+    thread::sleep(Duration::from_millis(30000));
+    stop_discovery(&conn).unwrap();
+
+    let devices = get_devices(&conn).unwrap();
+    print_devices(&devices);
 }
 
 fn get_adapters(conn: &Connection) -> Result<Vec<Adapter>, Error> {
@@ -52,6 +51,18 @@ fn get_devices(conn: &Connection) -> Result<Vec<Device>, Error> {
     Ok(devices)
 }
 
+fn start_discovery(conn: &Connection) -> Result<(), Error> {
+    let proxy = conn.with_proxy("org.bluez", "/org/bluez/hci0", Duration::from_millis(5000));
+    proxy.method_call("org.bluez.Adapter1", "StartDiscovery", ())?;
+    Ok(())
+}
+
+fn stop_discovery(conn: &Connection) -> Result<(), Error> {
+    let proxy = conn.with_proxy("org.bluez", "/org/bluez/hci0", Duration::from_millis(5000));
+    proxy.method_call("org.bluez.Adapter1", "StopDiscovery", ())?;
+    Ok(())
+}
+
 #[derive(Debug)]
 struct Adapter {
     id: String,
@@ -76,14 +87,8 @@ impl Adapter {
         let map_u32 = |key| prop_cast::<u32>(map, key).copied().unwrap();
         let map_bool = |key| prop_cast::<bool>(map, key).copied().unwrap();
 
-        let id = path
-            .to_string()
-            .strip_prefix("/org/bluez/")
-            .unwrap()
-            .to_owned();
-
         Adapter {
-            id,
+            id: path.to_string().to_owned(),
             address: map_str("Address"),
             address_type: map_str("AddressType"),
             name: map_str("Name"),
@@ -104,9 +109,9 @@ impl Adapter {
 #[derive(Debug)]
 struct Device {
     address: String,
-    address_type: String,
-    name: String,
-    alias: String,
+    // address_type: String,
+    // name: String,
+    // alias: String,
     // class: u32,
     // appearance: u16,
     // icon: String,
@@ -135,9 +140,9 @@ impl Device {
 
         Device {
             address: map_str("Address"),
-            address_type: map_str("AddressType"),
-            name: map_str("Name"),
-            alias: map_str("Alias"),
+            // address_type: map_str("AddressType"),
+            // name: map_str("Name"),
+            // alias: map_str("Alias"),
             // class: map_u32("Class"),
             // appearance: map_u16("Appearance"),
             // icon: map_str("icon"),
@@ -156,4 +161,18 @@ impl Device {
             services_resolved: map_bool("ServicesResolved"),
         }
     }
+}
+
+fn print_devices(devices: &Vec<Device>) {
+    println!("Devices:");
+    devices
+        .into_iter()
+        .for_each(|d| println!("{} - {}", d.address, if d.connected { "on" } else { "off" }));
+    println!();
+}
+
+fn print_adapters(adapters: &Vec<Adapter>) {
+    println!("Adapters:");
+    adapters.into_iter().for_each(|a| println!("{}", a.name));
+    println!();
 }
