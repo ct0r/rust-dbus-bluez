@@ -1,24 +1,62 @@
-use dbus::arg::{prop_cast, PropMap};
-use dbus::blocking::stdintf::org_freedesktop_dbus::ObjectManager;
-use dbus::blocking::Connection;
+use dbus::{
+    arg::{self, prop_cast, PropMap},
+    Message,
+};
+use dbus::{
+    blocking::stdintf::org_freedesktop_dbus::{
+        ObjectManager, ObjectManagerInterfacesAdded as InterfacesAdded,
+        ObjectManagerInterfacesRemoved as InterfacesRemoved,
+    },
+    message::MatchRule,
+    MessageType,
+};
+use dbus::{blocking::Connection, channel::Token};
 use dbus::{Error, Path};
 use std::{thread, time::Duration};
 
 fn main() {
     let conn = Connection::new_system().unwrap();
 
-    let adapters = get_adapters(&conn).unwrap();
-    print_adapters(&adapters);
+    // let adapters = get_adapters(&conn).unwrap();
+    // print_adapters(&adapters);
 
-    let devices = get_devices(&conn).unwrap();
-    print_devices(&devices);
+    // let devices = get_devices(&conn).unwrap();
+    // print_devices(&devices);
 
+    let ids = start_handle(&conn).unwrap();
     start_discovery(&conn).unwrap();
-    thread::sleep(Duration::from_millis(30000));
-    stop_discovery(&conn).unwrap();
 
-    let devices = get_devices(&conn).unwrap();
-    print_devices(&devices);
+    loop {
+        conn.process(Duration::from_millis(10000)).unwrap();
+    }
+
+    stop_discovery(&conn).unwrap();
+    stop_handle(&conn, ids).unwrap();
+}
+
+fn start_handle(conn: &Connection) -> Result<(Token, Token), Error> {
+    let proxy = conn.with_proxy("org.bluez", "/", Duration::from_millis(5000));
+
+    let added_id = proxy.match_signal(|h: InterfacesAdded, _: &Connection, _: &Message| {
+        println!("Added: {}", h.object);
+        true
+    })?;
+
+    let removed_id = proxy.match_signal(|h: InterfacesRemoved, _: &Connection, _: &Message| {
+        println!("Removed: {}", h.object);
+        true
+    })?;
+
+    Ok((added_id, removed_id))
+}
+
+fn stop_handle(conn: &Connection, ids: (Token, Token)) -> Result<(), Error> {
+    let proxy = conn.with_proxy("org.bluez", "/", Duration::from_millis(5000));
+
+    proxy.match_stop(ids.0, true)?;
+    proxy.match_stop(ids.1, true)?;
+
+    Ok(())
 }
 
 fn get_adapters(conn: &Connection) -> Result<Vec<Adapter>, Error> {
@@ -61,6 +99,20 @@ fn stop_discovery(conn: &Connection) -> Result<(), Error> {
     let proxy = conn.with_proxy("org.bluez", "/org/bluez/hci0", Duration::from_millis(5000));
     proxy.method_call("org.bluez.Adapter1", "StopDiscovery", ())?;
     Ok(())
+}
+
+fn print_devices(devices: &Vec<Device>) {
+    println!("Devices:");
+    devices
+        .into_iter()
+        .for_each(|d| println!("{} - {}", d.address, if d.connected { "on" } else { "off" }));
+    println!();
+}
+
+fn print_adapters(adapters: &Vec<Adapter>) {
+    println!("Adapters:");
+    adapters.into_iter().for_each(|a| println!("{}", a.name));
+    println!();
 }
 
 #[derive(Debug)]
@@ -161,18 +213,4 @@ impl Device {
             services_resolved: map_bool("ServicesResolved"),
         }
     }
-}
-
-fn print_devices(devices: &Vec<Device>) {
-    println!("Devices:");
-    devices
-        .into_iter()
-        .for_each(|d| println!("{} - {}", d.address, if d.connected { "on" } else { "off" }));
-    println!();
-}
-
-fn print_adapters(adapters: &Vec<Adapter>) {
-    println!("Adapters:");
-    adapters.into_iter().for_each(|a| println!("{}", a.name));
-    println!();
 }
