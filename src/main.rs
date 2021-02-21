@@ -1,26 +1,55 @@
 use dbus::arg::{prop_cast, PropMap};
 use dbus::blocking::stdintf::org_freedesktop_dbus::ObjectManager;
 use dbus::blocking::Connection;
-use dbus::Path;
-use std::collections::HashMap;
+use dbus::{Error, Path};
 use std::time::Duration;
 
 fn main() {
     let conn = Connection::new_system().unwrap();
+
+    println!("Adapters:");
+    get_adapters(&conn)
+        .unwrap()
+        .into_iter()
+        .for_each(|a| println!("{}", a.name));
+    println!();
+
+    println!("Devices:");
+    get_devices(&conn)
+        .unwrap()
+        .into_iter()
+        .for_each(|d| println!("{}", d.name));
+    println!();
+}
+
+fn get_adapters(conn: &Connection) -> Result<Vec<Adapter>, Error> {
     let proxy = conn.with_proxy("org.bluez", "/", Duration::from_millis(5000));
+    let tree = proxy.get_managed_objects()?;
 
-    let tree: HashMap<Path<'static>, HashMap<String, PropMap>> =
-        proxy.get_managed_objects().unwrap();
-
-    tree.into_iter()
+    let adapters = tree
+        .into_iter()
         .filter_map(|(key, interfaces)| {
             let props: &PropMap = interfaces.get("org.bluez.Adapter1")?;
-
             Some(Adapter::new(key, props))
         })
-        .for_each(|d| {
-            println!("{:?}", d);
-        });
+        .collect();
+
+    Ok(adapters)
+}
+
+fn get_devices(conn: &Connection) -> Result<Vec<Device>, Error> {
+    let proxy = conn.with_proxy("org.bluez", "/", Duration::from_millis(5000));
+    let tree = proxy.get_managed_objects()?;
+
+    let devices = tree
+        .into_iter()
+        .filter_map(|(path, interfaces)| {
+            let props: &PropMap = interfaces.get("org.bluez.Device1")?;
+            Some(Device::new(path, props))
+        })
+        .collect();
+
+    Ok(devices)
 }
 
 #[derive(Debug)]
@@ -42,12 +71,12 @@ struct Adapter {
 }
 
 impl Adapter {
-    fn new(key: Path, map: &PropMap) -> Adapter {
+    fn new(path: Path, map: &PropMap) -> Adapter {
         let map_str = |key| prop_cast::<String>(map, key).unwrap().to_owned();
         let map_u32 = |key| prop_cast::<u32>(map, key).copied().unwrap();
         let map_bool = |key| prop_cast::<bool>(map, key).copied().unwrap();
 
-        let id = key
+        let id = path
             .to_string()
             .strip_prefix("/org/bluez/")
             .unwrap()
@@ -68,6 +97,63 @@ impl Adapter {
             discovering: map_bool("Discovering"),
             modalias: map_str("Modalias"),
             uuids: prop_cast::<Vec<String>>(map, "UUIDs").unwrap().to_owned(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Device {
+    address: String,
+    address_type: String,
+    name: String,
+    alias: String,
+    // class: u32,
+    // appearance: u16,
+    // icon: String,
+    paired: bool,
+    trusted: bool,
+    blocked: bool,
+    legacy_pairing: bool,
+    // rssi: i16,
+    connected: bool,
+    uuids: Vec<String>,
+    // modalias: String,
+    // adapter:
+    // manufacturer_data:
+    // service_data:
+    // tx_power: i16,
+    services_resolved: bool,
+}
+
+impl Device {
+    fn new(path: Path, map: &PropMap) -> Device {
+        let map_str = |key| prop_cast::<String>(map, key).unwrap().to_owned();
+        let map_u32 = |key| prop_cast::<u32>(map, key).copied().unwrap();
+        let map_u16 = |key| prop_cast::<u16>(map, key).copied().unwrap();
+        let map_i16 = |key| prop_cast::<i16>(map, key).copied().unwrap();
+        let map_bool = |key| prop_cast::<bool>(map, key).copied().unwrap();
+
+        Device {
+            address: map_str("Address"),
+            address_type: map_str("AddressType"),
+            name: map_str("Name"),
+            alias: map_str("Alias"),
+            // class: map_u32("Class"),
+            // appearance: map_u16("Appearance"),
+            // icon: map_str("icon"),
+            paired: map_bool("Paired"),
+            trusted: map_bool("Trusted"),
+            blocked: map_bool("Blocked"),
+            legacy_pairing: map_bool("LegacyPairing"),
+            // rssi: map_i16("RSSI"),
+            connected: map_bool("Connected"),
+            uuids: prop_cast::<Vec<String>>(map, "UUIDs").unwrap().to_owned(),
+            // modalias: map_str("Modalias"),
+            // adapter:
+            // manufacturer_data:
+            // service_data:
+            // tx_power: map_i16("TxPower"),
+            services_resolved: map_bool("ServicesResolved"),
         }
     }
 }
