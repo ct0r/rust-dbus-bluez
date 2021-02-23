@@ -89,6 +89,12 @@ fn get_devices(conn: &Connection) -> Result<Vec<Device>, Error> {
     Ok(devices)
 }
 
+fn pair_device(conn: &Connection, path: &str) -> Result<(), Error> {
+    let proxy = conn.with_proxy("org.bluez", path, Duration::from_millis(60000));
+    proxy.method_call("org.bluez.Device1", "Pair", ())?;
+    Ok(())
+}
+
 fn start_discovery(conn: &Connection) -> Result<(), Error> {
     let proxy = conn.with_proxy("org.bluez", "/org/bluez/hci0", Duration::from_millis(5000));
     proxy.method_call("org.bluez.Adapter1", "StartDiscovery", ())?;
